@@ -1,0 +1,56 @@
+# based on https://github.com/pypa/sampleproject/blob/main/pyproject.toml
+[build-system]
+requires = ["setuptools", "setuptools.scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cicd_tutorial"
+version = "4.0.0"
+description = "A short CI/CD tutorial"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { file = "LICENSE.txt" }
+keywords = ["ci-cd", "continuous integration", "continuous deployment"]
+
+# TODO: adjust dependencies
+dependencies = [
+]
+
+# see https://pypi.org/classifiers/
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+[dependency-groups]
+testing = ["pytest", "pytest-cov"]
+linting = ["ruff"]
+typecheck = ["mypy"]
+
+# configure ruff
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E", # pycodestyle
+    "F", # pyflakes
+    "I", # isort
+    "B", # bugbear
+]
+
+[tool.ruff.format]
+quote-style = "single"
+
+# configure mypy
+[tool.mypy]
+python_version = "3.14"
+strict = true
+
+[project.scripts]
+app = 'myapp.app:main'
