@@ -2,11 +2,33 @@ import types as _types
 import typing as _typing
 
 
+class FieldInitializer[**P, TField: Field](_typing.Protocol):
+    """
+    A generic factory that creates a new field from a name, an annotation, and additional parameters defined via the
+    signature defined via `P`.
+
+    Any such initializer must take the name and annotation as its first two positional arguments.
+    """
+
+    # remark: this is less restrictive than `FieldFactory` which requires an exact match between the signature of
+    # `Field.__init__` and its `__call__`
+    def __call__(self, __name: str, __annotation: _typing.Any, /, *args: P.args, **kwargs: P.kwargs) -> TField:
+        """
+        Creates a new instance of the field.
+
+        :param __name: The name of the field.
+        :param __annotation: The annotation of the field.
+        :param args: Any additional positional arguments.
+        :param kwargs: Any additional keyword arguments.
+        """
+        ...
+
+
 class Field:
     """
     A class that describes a field of a dataclass-like class.
 
-    See :class:`DataclassMetaBase` for instructions of how to use subclasses of :class:`Field` to further constrain and
+    See :py:func:`make_dataclass` for instructions of how to use subclasses of :class:`Field` to further constrain and
     modify fields. Any member of instances of derived subclasses should be intended to be immutable.
     """
 
@@ -140,14 +162,159 @@ class Field:
         """
         pass
 
+    @classmethod
+    def declare[**P, TField: Field](cls: FieldInitializer[P, TField],
+                                    *args: P.args,
+                                    **kwargs: P.kwargs) -> FieldDeclaration[P, TField]:
+        """
+        Declares, but does not fully initialize a field. The field will be instantiated when the dataclass gets built.
+
+        Use this function to explicitly specify a field instance instead of letting it get initialized implicitly.
+
+        Example:
+        >>> class Dataclass(DataclassMeta):
+        ...     x: list = Field.declare(default_factory=list)
+
+        :param args: Positional arguments to supply to `__factory` after the values for `name` and `annotation`.
+        :param kwargs: Additional keyword arguments to supply to `__factory`.
+        :return: The generated field declaration.
+        """
+        return field(cls, *args, **kwargs)
+
+
+class FieldDeclaration[**P, TField: Field]:
+    """Declares, but does not fully initialize a field. The field will be instantiated when the dataclass gets built."""
+
+    def __init__(self, __factory: FieldInitializer[P, TField], /, *args: P.args, **kwargs: P.kwargs) -> None:
+        """
+        Initializes the current instance.
+
+        :param __factory: The factory that converts the declaration into an actual field.
+        :param args: Positional arguments to supply to `__factory` after the values for `name` and `annotation`.
+        :param kwargs: Additional keyword arguments to supply to `__factory`.
+        """
+        self._factory = __factory
+        self._args = args
+        self._kwargs = kwargs
+
+    def __call__(self, name: str, annotation: _typing.Any) -> TField:
+        """
+        Instantiates the field from the declaration represented by the current instance.
+
+        :param name: The name to use for the field.
+        :param annotation: The annotation to use for the field.
+        :return: The instantiated field.
+        """
+        return self._factory(name, annotation, *self._args, **self._kwargs)
+
+
+def field[**P, TField: Field](__cls: FieldInitializer[P, TField] = Field,
+                              /,
+                              *args: P.args,
+                              **kwargs: P.kwargs) -> FieldDeclaration[P, TField]:
+    """
+    Declares, but does not fully initialize a field. The field will be instantiated when the dataclass gets built.
+
+    Use this function to explicitly specify a field instance instead of letting it get initialized implicitly. For
+    derived field types, consider :py:method:`Field.declare`.
+
+    Example:
+    >>> class Dataclass(DataclassMeta):
+    ...     x: list = field(default_factory=list)
+
+    :param __cls: The field type or, more general, a factory that generates the field.
+    :param args: Positional arguments to supply to `__factory` after the values for `name` and `annotation`.
+    :param kwargs: Additional keyword arguments to supply to `__factory`.
+    :return: The generated field declaration.
+    """
+
+    return FieldDeclaration(__cls, *args, **kwargs)
+
 
 class _Unspecified:
     """The class is used as a singleton together with dictionaries."""
     pass
 
 
+class FieldFactory[TField: Field](_typing.Protocol):
+    """A protocol that behaves similar to the factory represented by the :class:`Field` type."""
+
+    def __call__(
+            self,
+            name: str,
+            annotation: _typing.Any,
+            has_default: bool = False,
+            default: _typing.Any = None,
+            default_factory: _typing.Callable[[], None] | None = None,
+    ) -> TField:
+        """
+        Initializes the current instance.
+
+        :param name: The name of the field. This must be a valid Python identifier.
+        :param annotation: The annotation of the field.
+        :param has_default: Indicates whether the field has a default value, which is then specified in the
+            ``default``-parameter or the ``default_factory`` parameter. If ``True``, either ``default`` or
+            ``default_factory`` is to be set to a value.
+        :param default: If ``has_default`` is ``True``, this may specify a constant default value the field takes on.
+            If ``has_default`` is ``False`` or ``default_factory`` is set to a value, this must be ``None``.
+        :param default_factory: If ``has_default`` is ``True``, this may specify a factory that generates a default
+            value for the field.
+            If ``has_default`` is ``False`` or ``default`` is set to a value, this must be ``None``.
+        """
+        ...
+
+
 class FieldProvider[TField: Field]:
     """Handles the creation and override behavior of fields."""
+
+    def __init__(self,
+                 field_factory: FieldFactory[TField] = Field,
+                 external_field_validator: type[TField] | _typing.Callable[[Field], TField] = ...) -> None:
+        """
+        Initializes the current instance.
+
+        :param field_factory: The factory used to initialize a field. It must have the same signature as the initializer
+            of the :class:`Field` class.
+        :param external_field_validator: Used to validate fields that were externally supplied. Either specify a
+            field type, or a handler to invoke. If not supplied, `field_factory` is used if it is a type. If
+            `field_factory` is not a type, `external_field_validator` must be explicitly set to a value.
+        """
+
+        if external_field_validator is ...:
+            if not isinstance(field_factory, type):
+                raise ValueError(
+                    'If `field_factory` is not a type, `external_field_validator` must be indicated explicitly.')
+
+            external_field_validator = field_factory
+
+        self._field_factory = field_factory
+        self._external_field_validator = external_field_validator
+
+    def _validate_field(self, field: Field) -> TField:
+        """
+        Validates an externally defined field and (unsafely) casts it to `TField`.
+
+        :param field: The field to validate.
+        :return: The converted field.
+        """
+        if isinstance(self._external_field_validator, type):
+            if not isinstance(field, self._external_field_validator):
+                raise TypeError(f'Field `{field.name}` was set to a value of an unsupported type.')
+
+            return _typing.cast(TField, field)
+
+        return _typing.cast(_typing.Callable[[Field], TField], self._external_field_validator)(field)
+
+    def instantiate_field(self, name: str, annotation: _typing.Any, declaration: FieldDeclaration) -> TField:
+        """
+        Instantiates a field from a field declaration.
+
+        :param name: The name of the field.
+        :param annotation: The annotation of the field.
+        :param declaration: Additional parameters to supply to the field type.
+        :return: The instantiated field.
+        """
+        return self._validate_field(declaration(name, annotation))
 
     def make_field(self, name: str, annotation: _typing.Any, has_default: bool, default: _typing.Any) -> TField:
         """
@@ -159,10 +326,27 @@ class FieldProvider[TField: Field]:
         :param default: The default value of the field.
         :return: The field created for the given parameters.
         """
-        if has_default and isinstance(default, Field):
-            return default
+        if has_default:
+            if isinstance(default, Field):
+                self._validate_field(default)
+                return default
+            elif isinstance(default, FieldDeclaration):
+                return self.instantiate_field(name, annotation, default)
 
-        return Field(name, annotation=annotation, has_default=has_default, default=default)
+        return self._field_factory(name, annotation=annotation, has_default=has_default, default=default)
+
+    def create_field_override(self, original: Field) -> TField:
+        """
+        Creates a new field from an original field declared on a base class.
+
+        :param original: The original field.
+        :return: The new field.
+        """
+        return self._field_factory(original.name,
+                                   annotation=original.annotation,
+                                   has_default=original.has_default,
+                                   default=original.default,
+                                   default_factory=original.default_factory)
 
     def check_overrides(self,
                         base_fields: _types.MappingProxyType[str, Field],
@@ -190,7 +374,7 @@ class ObjectHandler[TField: Field]:
 
     def init_instance(
             self,
-            tp: type[DataclassMetaBase],
+            cls: DataclassType,
             obj: _typing.Any,
             args: tuple[_typing.Any, ...],
             kwargs: dict[str, _typing.Any],
@@ -201,12 +385,12 @@ class ObjectHandler[TField: Field]:
 
         This method gets called during the `__init__` method call of `obj`.
 
-        :param tp: The class of the object to initialize.
+        :param cls: The class of the object to initialize.
         :param obj: The object to initialize.
         :param args: The positional arguments.
         :param kwargs: The keyword arguments.
         """
-        fields = tp.__dataclass_fields__
+        fields = cls.__dataclass_fields__
 
         # Ensure that `args` and `kwargs` are not overlapping and point to existing fields
 
@@ -308,7 +492,7 @@ class ObjectHandler[TField: Field]:
 
 
 def make_dataclass[TField: Field](cls: type,
-                                  field_provider: FieldProvider[TField] = ...,
+                                  field_provider: FieldProvider[TField] | FieldFactory[TField] = ...,
                                   object_handler: ObjectHandler[TField] = ...) -> None:
     """
     Makes the indicated class dataclass-like. The class must not be a dataclass, yet.
@@ -323,6 +507,9 @@ def make_dataclass[TField: Field](cls: type,
 
     if field_provider is ...:
         field_provider = FieldProvider()
+    elif not isinstance(field_provider, FieldProvider):
+        # create the field provider from a `FieldFactory` object
+        field_provider = FieldProvider(field_provider)
 
     if object_handler is ...:
         object_handler = ObjectHandler()
@@ -333,7 +520,7 @@ def make_dataclass[TField: Field](cls: type,
 
     # check with all bases (that are not metaclasses) that our overrides are valid
     for base in cls.__bases__:
-        if issubclass(base, DataclassMetaBase):
+        if isinstance(base, DataclassMetaBase):
             field_provider.check_overrides(base.__dataclass_fields__, field_map)
 
     # determine the new `__init__` procedure. The old one gets called, too, if there is one (different from the one of
@@ -419,21 +606,28 @@ def _gather_fields[TField: Field](cls: type,
     :param field_provider: The field provider used to initialize the fields.
     :return: The mapping of field names to fields.
     """
-    fields = []
+    field_dict = {}
 
-    # 1. gather the annotations from the MRO (`cls` itself is in the MRO)
-    annotations = {}
+    # 1. gather the fields from the base classes
 
-    for stp in reversed(cls.__mro__):
-        if not isinstance(stp, DataclassMetaBase):
+    for stp in reversed(cls.__mro__[1:]):
+        fields = getattr(stp, '__dataclass_fields__', None)
+
+        if fields is not None:
+            field_dict.update(fields)
+
+    # 2. create new field representations of fields that we inherited from base classes
+
+    annotations = cls.__annotations__
+
+    for k, field in field_dict.items():
+        if k in annotations:
+            # we leave out those that'll receive an annotation in 3.
             continue
 
-        annot = getattr(stp, '__annotations__', None)
+        field_dict[k] = field_provider.create_field_override(field)
 
-        if isinstance(annot, dict):
-            annotations.update(annot)
-
-    # 2. create fields for the gathered annotations. A valid field *requires* an annotation.
+    # 3. create the fields defined via annotations on the current instance
     for k, annot in annotations.items():
         default = getattr(cls, k, _Unspecified)
 
@@ -442,9 +636,10 @@ def _gather_fields[TField: Field](cls: type,
                                           default is not _Unspecified,
                                           None if default is _Unspecified else default)
 
-        fields.append(field)
+        field_dict[k] = field
 
-    field_dict = {field.name: field for field in fields}
+    if any(field.name != k for k, field in field_dict.items()):
+        raise ValueError(f'The field names must be preserved by the operations of the field provider.')
 
     return _types.MappingProxyType(field_dict)
 
@@ -496,3 +691,11 @@ class DataclassMeta[TField: Field](DataclassMetaBase[TField]):
     dataclass-like behavior. See :class:`DataclassMetaBase` and :py:func:`make_dataclass` for further information.
     """
     pass
+
+
+@_typing.runtime_checkable
+class DataclassType[TField](_typing.Protocol):
+    """A protocol that describes the members of dataclass-like classes."""
+
+    __dataclass_fields__: _typing.Mapping[str, TField]
+    """The fields of the dataclass."""
