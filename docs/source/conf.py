@@ -9,9 +9,9 @@ import sys
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'CICD-Tutorial'
-copyright = '2026, omicronZero'
-author = 'omicronZero'
+project = 'DataClassBase'
+copyright = '2026, Josef Mayr'
+author = 'Josef Mayr'
 release = '0.1'
 
 # -- General configuration ---------------------------------------------------
@@ -35,5 +35,3 @@ html_theme = 'pydata_sphinx_theme'
 html_static_path = ['_static']
 
 sys.path.insert(0, os.path.abspath('../..'))
-
-print('\n'.join(sys.path))

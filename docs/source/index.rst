@@ -6,4 +6,4 @@ CICD-Tutorial documentation
    :maxdepth: 2
    :caption: Contents:
 
-   api
+   _autogen/modules
