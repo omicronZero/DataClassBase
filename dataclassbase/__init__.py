@@ -458,7 +458,7 @@ class DataclassMetaBase[TField: Field](type):
     method is not applied to the current type since it requires specific field specifiers. In derived classes, however,
     the field specifiers may not be limited to the :class:`Field`-class. Therefore, you should define a metaclass that
     is derived from the :class:`DataclassMetaBase` class if you want to define a class with custom field specifiers and
-    add a :py:func:`typing.dataclass_transform`-decoration to them. Use the :py:method:`_field_provider` to control the
+    add a :py:func:`typing.dataclass_transform`-decoration to them. Use the :py:func:`_field_provider` to control the
     conversion of the field specifies into fields.
     """
     __dataclass_fields__: _types.MappingProxyType[str, Field]
