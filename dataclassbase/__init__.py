@@ -2,6 +2,7 @@ import types as _types
 import typing as _typing
 
 from ._util import E as _E
+from ._util import throws as _throws
 
 
 class FieldInitializer[**P, TField: Field](_typing.Protocol):
@@ -564,7 +565,9 @@ def make_dataclass[TField: Field](
 
 @_typing.overload
 def dataclass[TField: Field, TCls: type](
-    *, field_provider: FieldProvider[TField] = ..., object_handler: ObjectHandler[TField] = ...
+    *,
+    field_provider: _E[FieldProvider[TField] | FieldFactory[TField]] = ...,
+    object_handler: ObjectHandler[TField] = ...,
 ) -> _typing.Callable[[TCls], TCls]:
     """
     Returns a function that that makes the classes supplied to it dataclass-like. The classes must not be dataclasses,
@@ -581,7 +584,10 @@ def dataclass[TField: Field, TCls: type](
 
 @_typing.overload
 def dataclass[TField: Field, TCls: type](
-    cls: TCls, /, field_provider: FieldProvider[TField] = ..., object_handler: ObjectHandler[TField] = ...
+    cls: TCls,
+    /,
+    field_provider: _E[FieldProvider[TField] | FieldFactory[TField]] = ...,
+    object_handler: ObjectHandler[TField] = ...,
 ) -> TCls:
     """
     Makes the indicated class dataclass-like. The class must not be a dataclass, yet.
@@ -597,7 +603,7 @@ def dataclass[TField: Field, TCls: type](
 def dataclass[TField: Field, TCls: type](
     cls: _E[TCls] = ...,
     /,
-    field_provider: _E[FieldProvider[TField]] = ...,
+    field_provider: _E[FieldProvider[TField] | FieldFactory[TField]] = ...,
     object_handler: _E[ObjectHandler[TField]] = ...,
 ) -> TCls | _typing.Callable[[TCls], TCls]:
     if cls is ...:
@@ -716,3 +722,46 @@ class DataclassType[TField](_typing.Protocol):
 
     __dataclass_fields__: _typing.Mapping[str, TField]
     """The fields of the dataclass."""
+
+
+class TypeConstrainedField(Field):
+    """
+    A field that can be used to provide simple `isinstance`-based type checking using the field's annotation.
+
+    The annotation must provide an `__instancecheck__` to perform assignment checks. Note that the instance check gets
+    invoked once with `None` during initialization to eliminate the .
+    """
+    def __init__(
+        self,
+        name: str,
+        annotation: _typing.Any,
+        has_default: bool = False,
+        default: _typing.Any = None,
+        default_factory: _typing.Callable[[], None] | None = None,
+    ) -> None:
+        """
+        Initializes the current instance.
+
+        :param name: The name of the field. This must be a valid Python identifier.
+        :param annotation: The annotation of the field. This must provide a suitable `__instancecheck__` method.
+        :param has_default: Indicates whether the field has a default value, which is then specified in the
+            ``default``-parameter or the ``default_factory`` parameter. If ``True``, either ``default`` or
+            ``default_factory`` is to be set to a value.
+        :param default: If ``has_default`` is ``True``, this may specify a constant default value the field takes on.
+            If ``has_default`` is ``False`` or ``default_factory`` is set to a value, this must be ``None``.
+        :param default_factory: If ``has_default`` is ``True``, this may specify a factory that generates a default
+            value for the field.
+            If ``has_default`` is ``False`` or ``default`` is set to a value, this must be ``None``.
+        """
+        instance_check = getattr(annotation, '__instancecheck__', None)
+
+        if instance_check is None or _throws(lambda: instance_check(None), TypeError, ValueError):
+            raise TypeError('`annotation` must provide an `__instancecheck__` method usable for type checking.')
+
+        super().__init__(name, annotation, has_default, default, default_factory)
+
+        self._instance_check = instance_check
+
+    def check_assignment(self, obj: _typing.Any) -> None:
+        if not self._instance_check(obj):
+            raise TypeError(f'The object is not a valid assignment to field `{self.name}`.')
