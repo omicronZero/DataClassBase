@@ -4,13 +4,13 @@ requires = ["setuptools", "setuptools.scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cicd_tutorial"
-version = "4.0.0"
-description = "A short CI/CD tutorial"
+name = "dataclassbase"
+version = "0.1"
+description = ""
 readme = "README.md"
 requires-python = ">=3.14"
 license = { file = "LICENSE.txt" }
-keywords = ["ci-cd", "continuous integration", "continuous deployment"]
+keywords = []
 
 # TODO: adjust dependencies
 dependencies = [
@@ -55,6 +55,3 @@ quote-style = "single"
 [tool.mypy]
 python_version = "3.14"
 strict = true
-
-[project.scripts]
-app = 'dataclassbase.app:main'
